@@ -127,8 +127,8 @@
 
     <div class="section-box">
       <h3>極座標ゲイン</h3>
-      <div class="row"><label>k_ρ <span class="val" id="k-rho-val">0.50</span>
-        <input type="range" id="k-rho" min="0.1" max="2" step="0.05" value="0.5"></label></div>
+      <div class="row"><label>k_ρ <span class="val" id="k-rho-val">1.00</span>
+        <input type="range" id="k-rho" min="0.1" max="3" step="0.05" value="1.0"></label></div>
       <div class="row"><label>k_α <span class="val" id="k-alpha-val">1.50</span>
         <input type="range" id="k-alpha" min="0.1" max="5" step="0.1" value="1.5"></label></div>
       <div class="row"><label>k_β <span class="val" id="k-beta-val">-0.50</span>
@@ -146,6 +146,14 @@
       <div class="row">
         <label><input type="checkbox" id="carrot-use-i" checked> 積分項を有効</label>
       </div>
+    </div>
+
+    <div class="section-box">
+      <h3>速度サチュレーション(両者共通)</h3>
+      <div class="row"><label>v_max [m/s] <span class="val" id="v-max-val">0.80</span>
+        <input type="range" id="v-max" min="0.1" max="1.5" step="0.05" value="0.8"></label></div>
+      <div class="row"><label>v_min [m/s] <span class="val" id="v-min-val">0.10</span>
+        <input type="range" id="v-min" min="0.0" max="0.3" step="0.01" value="0.10"></label></div>
     </div>
 
     <div class="section-box">
@@ -287,18 +295,26 @@ class PolylinePath {
 // debug: 可視化用の補助情報(任意)
 
 // ---------- 極座標モデル ----------
-//   v = k_ρ · ρ
-//   ω = k_α · α + k_β · β
+//   v_raw = k_ρ · ρ
+//   v     = clip(v_raw, v_min, v_max)        ← サチュレーションで実用化
+//   ω     = k_α · α + k_β · β
+//
+// v_min を 0 にすれば理論通りの「ρに比例して0に漸近」、
+// v_min > 0 でサイクルタイム重視の実用モードになる。
 class PolarController {
   constructor(params) {
     this.k_rho = params.k_rho;
     this.k_alpha = params.k_alpha;
     this.k_beta = params.k_beta;
+    this.v_max = params.v_max ?? 0.8;
+    this.v_min = params.v_min ?? 0.0;
   }
   setParams(p) {
     this.k_rho = p.k_rho;
     this.k_alpha = p.k_alpha;
     this.k_beta = p.k_beta;
+    if (p.v_max !== undefined) this.v_max = p.v_max;
+    if (p.v_min !== undefined) this.v_min = p.v_min;
   }
   update(state, goal, _path, _dt) {
     const dx = goal.x - state.x;
@@ -308,12 +324,13 @@ class PolarController {
     const alpha = normalizeAngle(gamma - state.theta);    // ロボット向きからの差
     const beta  = normalizeAngle(goal.theta - gamma);     // ゴール方向からゴール姿勢への差
 
-    const v = this.k_rho * rho;
+    const v_raw = this.k_rho * rho;
+    const v = Math.max(this.v_min, Math.min(this.v_max, v_raw));
     const omega = this.k_alpha * alpha + this.k_beta * beta;
 
     return {
       v, omega,
-      debug: { rho, alpha, beta, gamma }
+      debug: { rho, alpha, beta, gamma, v_raw }
     };
   }
 }
@@ -329,6 +346,8 @@ class CarrotController {
     this.k_p = params.k_p;
     this.k_i = params.k_i;
     this.useIntegral = params.useIntegral;
+    this.v_max = params.v_max ?? 0.8;
+    this.v_min = params.v_min ?? 0.0;
     this.reset();
   }
   setParams(p) {
@@ -336,6 +355,8 @@ class CarrotController {
     this.k_p = p.k_p;
     this.k_i = p.k_i;
     this.useIntegral = p.useIntegral;
+    if (p.v_max !== undefined) this.v_max = p.v_max;
+    if (p.v_min !== undefined) this.v_min = p.v_min;
   }
   reset() {
     this.integ = 0;
@@ -344,12 +365,11 @@ class CarrotController {
     // 1. 最近傍点
     const sNear = path.nearestPointS({ x: state.x, y: state.y });
 
-    // 2. v_target: 引継ぎ後の簡易減速プロファイル
-    //    パス残距離に応じて線形減速(シンプル化のため)
-    const vMax = 0.8;
-    const remaining = Math.max(0, path.getTotalLength() - sNear);
-    const v_target = Math.min(vMax, vMax * (remaining / path.getTotalLength()) + 0.05);
-    //   ↑ 最後に極小値を足して L_lookahead=0 を回避
+    // 2. v_target: パス残距離に応じた線形減速 + サチュレーション
+    const totalLen = path.getTotalLength();
+    const remaining = Math.max(0, totalLen - sNear);
+    const v_raw = this.v_max * (remaining / totalLen);
+    const v_target = Math.max(this.v_min, Math.min(this.v_max, v_raw));
 
     // 3. LookAheadPoint
     const L = v_target * this.t_lookahead;
@@ -361,8 +381,8 @@ class CarrotController {
       Math.atan2(LAP.y - state.y, LAP.x - state.x) - state.theta
     );
 
-    // 5. 積分項 (積分ワインドアップを防ぐため v_target ほぼ0では更新停止)
-    if (this.useIntegral && v_target > 0.05) {
+    // 5. 積分項
+    if (this.useIntegral) {
       this.integ += eta * dt;
     }
 
@@ -776,11 +796,20 @@ const state = {
   speed: 1.0,
   currentPathId: 'line_1.5m',
   currentPresetId: 'default',
+  v_max: 0.8,
+  v_min: 0.10,
   params: {
-    polar:  { k_rho: 0.5, k_alpha: 1.5, k_beta: -0.5 },
-    carrot: { t_lookahead: 0.5, k_p: 2.0, k_i: 0.5, useIntegral: true },
+    polar:  { k_rho: 1.0, k_alpha: 1.5, k_beta: -0.5, v_max: 0.8, v_min: 0.10 },
+    carrot: { t_lookahead: 0.5, k_p: 2.0, k_i: 0.5, useIntegral: true, v_max: 0.8, v_min: 0.10 },
   },
 };
+
+function syncSpeedParams() {
+  state.params.polar.v_max  = state.v_max;
+  state.params.polar.v_min  = state.v_min;
+  state.params.carrot.v_max = state.v_max;
+  state.params.carrot.v_min = state.v_min;
+}
 
 function populateSelect(selectEl, items) {
   selectEl.innerHTML = '';
@@ -972,6 +1001,12 @@ function init() {
   bindSlider('t-look',  't-look-val',  v => { state.params.carrot.t_lookahead = v; applyCarrotGains(); });
   bindSlider('k-p',     'k-p-val',     v => { state.params.carrot.k_p = v; applyCarrotGains(); });
   bindSlider('k-i',     'k-i-val',     v => { state.params.carrot.k_i = v; applyCarrotGains(); });
+  bindSlider('v-max',   'v-max-val',   v => {
+    state.v_max = v; syncSpeedParams(); applyPolarGains(); applyCarrotGains();
+  });
+  bindSlider('v-min',   'v-min-val',   v => {
+    state.v_min = v; syncSpeedParams(); applyPolarGains(); applyCarrotGains();
+  });
   bindSlider('dt',      'dt-val',      v => { state.dt = v; }, (v) => v.toFixed(3));
   bindSlider('speed',   'speed-val',   v => { state.speed = v; }, (v) => v.toFixed(2) + 'x');
 
