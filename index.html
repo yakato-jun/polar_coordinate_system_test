@@ -907,7 +907,9 @@ let lastFrameTime = null;
 function animate(now) {
   if (!state.playing) { lastFrameTime = null; return; }
   if (lastFrameTime == null) lastFrameTime = now;
-  const elapsed = (now - lastFrameTime) / 1000 * state.speed;
+  // タブ切替や一時停止後の大きなギャップで一気に進むのを防ぐ(上限 0.1s)
+  let elapsed = (now - lastFrameTime) / 1000 * state.speed;
+  if (elapsed > 0.1) elapsed = 0.1;
   lastFrameTime = now;
 
   // elapsed 秒分を dt 刻みで進める
@@ -966,14 +968,17 @@ function init() {
     if (state.polarSim.finished && state.carrotSim.finished) return;
     if (!state.playing) {
       state.playing = true;
+      lastFrameTime = null;       // 再生再開時は経過時間をリセット
       requestAnimationFrame(animate);
     }
   });
   document.getElementById('btn-pause').addEventListener('click', () => {
     state.playing = false;
+    lastFrameTime = null;
   });
   document.getElementById('btn-step').addEventListener('click', () => {
     state.playing = false;
+    lastFrameTime = null;
     state.polarSim.step(state.dt);
     state.carrotSim.step(state.dt);
     renderAll();
@@ -982,6 +987,7 @@ function init() {
   });
   document.getElementById('btn-reset').addEventListener('click', () => {
     state.playing = false;
+    lastFrameTime = null;
     rebuildSimulations();
   });
 
