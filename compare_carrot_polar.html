@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>極座標モデル vs キャロットチェイシング 比較</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+    margin: 0;
+    padding: 10px;
+    background: #f0f0f0;
+    font-size: 13px;
+  }
+  h1 { font-size: 16px; margin: 0 0 8px 0; }
+  h2 { font-size: 14px; margin: 0 0 6px 0; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+  h3 { font-size: 12px; margin: 8px 0 4px 0; color: #555; }
+
+  .container {
+    display: grid;
+    grid-template-columns: 1fr 1fr 300px;
+    gap: 10px;
+    min-height: 720px;
+  }
+  .panel {
+    background: white;
+    border: 1px solid #ccc;
+    padding: 10px;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  canvas.trajectory {
+    width: 100%;
+    height: 280px;
+    background: #fafafa;
+    border: 1px solid #ddd;
+    display: block;
+  }
+  .graph-wrapper {
+    position: relative;
+    height: 180px;
+    margin-top: 8px;
+  }
+  .stats {
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 11px;
+    background: #f5f5f5;
+    padding: 6px;
+    margin-top: 6px;
+    border-radius: 3px;
+    white-space: pre;
+    line-height: 1.4;
+  }
+  .controls .row { margin-bottom: 6px; }
+  .controls label { display: block; font-size: 11px; color: #333; }
+  .controls input[type="range"] { width: 180px; vertical-align: middle; }
+  .controls select { width: 100%; padding: 3px; }
+  .controls button {
+    padding: 4px 8px;
+    margin: 2px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .val { font-family: monospace; font-weight: bold; color: #06c; margin-left: 4px; }
+  .section-box {
+    border-top: 1px solid #ddd;
+    margin-top: 10px;
+    padding-top: 6px;
+  }
+  .note {
+    font-size: 11px;
+    color: #666;
+    background: #fffce0;
+    padding: 6px;
+    border-left: 3px solid #ec0;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+
+<h1>極座標モデル vs キャロットチェイシング ゴール姿勢収束性 比較</h1>
+
+<div class="container">
+
+  <!-- ========== キャロット側 ========== -->
+  <div class="panel">
+    <h2>キャロットチェイシング</h2>
+    <canvas class="trajectory" id="carrot-traj" width="600" height="280"></canvas>
+    <div class="graph-wrapper"><canvas id="carrot-omega-chart"></canvas></div>
+    <div class="graph-wrapper"><canvas id="carrot-beta-chart"></canvas></div>
+    <div class="stats" id="carrot-stats">-</div>
+  </div>
+
+  <!-- ========== 極座標側 ========== -->
+  <div class="panel">
+    <h2>極座標モデル</h2>
+    <canvas class="trajectory" id="polar-traj" width="600" height="280"></canvas>
+    <div class="graph-wrapper"><canvas id="polar-omega-chart"></canvas></div>
+    <div class="graph-wrapper"><canvas id="polar-beta-chart"></canvas></div>
+    <div class="stats" id="polar-stats">-</div>
+  </div>
+
+  <!-- ========== コントロールパネル ========== -->
+  <div class="panel controls">
+    <h2>コントロール</h2>
+
+    <div class="row">
+      <button id="btn-play">再生</button>
+      <button id="btn-pause">停止</button>
+      <button id="btn-step">ステップ</button>
+      <button id="btn-reset">リセット</button>
+    </div>
+
+    <div class="row">
+      <label>パス
+        <select id="path-select"></select>
+      </label>
+    </div>
+
+    <div class="row">
+      <label>プリセット(初期条件)
+        <select id="preset-select"></select>
+      </label>
+    </div>
+
+    <div class="section-box">
+      <h3>極座標ゲイン</h3>
+      <div class="row"><label>k_ρ <span class="val" id="k-rho-val">2.00</span>
+        <input type="range" id="k-rho" min="0.1" max="5" step="0.05" value="2.0"></label></div>
+      <div class="row"><label>k_α <span class="val" id="k-alpha-val">3.00</span>
+        <input type="range" id="k-alpha" min="0.1" max="8" step="0.1" value="3.0"></label></div>
+      <div class="row"><label>k_β <span class="val" id="k-beta-val">-0.50</span>
+        <input type="range" id="k-beta" min="-2" max="-0.05" step="0.05" value="-0.5"></label></div>
+    </div>
+
+    <div class="section-box">
+      <h3>キャロットゲイン</h3>
+      <div class="row"><label>t_lookahead [s] <span class="val" id="t-look-val">0.50</span>
+        <input type="range" id="t-look" min="0.1" max="1.5" step="0.05" value="0.5"></label></div>
+      <div class="row"><label>K_p <span class="val" id="k-p-val">2.00</span>
+        <input type="range" id="k-p" min="0.5" max="5" step="0.1" value="2.0"></label></div>
+      <div class="row"><label>K_i <span class="val" id="k-i-val">0.50</span>
+        <input type="range" id="k-i" min="0" max="2" step="0.05" value="0.5"></label></div>
+      <div class="row">
+        <label><input type="checkbox" id="carrot-use-i" checked> 積分項を有効</label>
+      </div>
+    </div>
+
+    <div class="section-box">
+      <h3>速度サチュレーション(両者共通)</h3>
+      <div class="row"><label>v_max [m/s] <span class="val" id="v-max-val">0.80</span>
+        <input type="range" id="v-max" min="0.1" max="1.5" step="0.05" value="0.8"></label></div>
+      <div class="row"><label>v_min [m/s] <span class="val" id="v-min-val">0.00</span>
+        <input type="range" id="v-min" min="0.0" max="0.3" step="0.01" value="0.00"></label></div>
+    </div>
+
+    <div class="section-box">
+      <h3>シミュレーション</h3>
+      <div class="row"><label>dt [s] <span class="val" id="dt-val">0.02</span>
+        <input type="range" id="dt" min="0.005" max="0.05" step="0.005" value="0.02"></label></div>
+      <div class="row"><label>再生速度 <span class="val" id="speed-val">1.0x</span>
+        <input type="range" id="speed" min="0.25" max="4" step="0.25" value="1.0"></label></div>
+    </div>
+
+    <div class="note">
+      <b>比較のポイント(デフォルトプリセット):</b><br>
+      初期 β = +8° に対し、ロボットは α ≒ 0(パス方向を向いた状態)でスタート。<br>
+      ① キャロット側は ω_cmd ≒ 0 のまま(LAP方向を向いているので修正のしようがない)<br>
+      → β は最初から最後までほぼ +8° のまま <b>残留</b><br>
+      ② 極座標側は ω = k_β·β ≠ 0 を出し続ける<br>
+      → β は ρ→0 につれて <b>0 に向かって減少</b><br><br>
+      <b>見るべき:</b> 統計欄の「β = ... (初期: ...)」。同じ初期条件から始めた β がどれだけ詰まったかを比較。<br><br>
+      <b>極座標側の内部状態</b>は (ρ, α, β) で保持し、極座標キネマティクスを直接積分している。(x,y,θ) はそこから導出した表示用。
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* =========================================================
+ * [SECTION 1] ユーティリティ
+ * ========================================================= */
+const deg = (x) => x * Math.PI / 180;
+const rad2deg = (x) => x * 180 / Math.PI;
+
+// 角度を [-π, π] に正規化
+function normalizeAngle(a) {
+  while (a > Math.PI) a -= 2 * Math.PI;
+  while (a < -Math.PI) a += 2 * Math.PI;
+  return a;
+}
+
+// 2点間距離
+function dist(p1, p2) {
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  return Math.hypot(dx, dy);
+}
+
+// 数値を指定桁に丸めて文字列化
+function fmt(x, digits = 3) {
+  if (!isFinite(x)) return '-';
+  return x.toFixed(digits);
+}
+
+/* =========================================================
+ * [SECTION 2] Path クラス群
+ * ========================================================= */
+// 共通インターフェース:
+//   getPoint(s)       -> {x, y}       弧長sの点
+//   getTangent(s)     -> number(rad)  弧長sでの接線方向
+//   getTotalLength()  -> number       パス全長
+//   nearestPointS(p)  -> number       最近傍点の弧長s
+//   sample(n)         -> [{x,y},...]  描画用のサンプル点
+
+class LinePath {
+  constructor(x1, y1, x2, y2) {
+    this.p1 = { x: x1, y: y1 };
+    this.p2 = { x: x2, y: y2 };
+    this.length = dist(this.p1, this.p2);
+    this.tangent = Math.atan2(y2 - y1, x2 - x1);
+  }
+  getPoint(s) {
+    const t = Math.max(0, Math.min(1, s / this.length));
+    return {
+      x: this.p1.x + (this.p2.x - this.p1.x) * t,
+      y: this.p1.y + (this.p2.y - this.p1.y) * t,
+    };
+  }
+  getTangent(_s) { return this.tangent; }
+  getTotalLength() { return this.length; }
+  nearestPointS(p) {
+    // 線分への射影
+    const dx = this.p2.x - this.p1.x;
+    const dy = this.p2.y - this.p1.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 1e-12) return 0;
+    const t = ((p.x - this.p1.x) * dx + (p.y - this.p1.y) * dy) / len2;
+    const tc = Math.max(0, Math.min(1, t));
+    return tc * this.length;
+  }
+  sample(n = 2) {
+    return [this.p1, this.p2];
+  }
+}
+
+// 将来: 円弧や折れ線を足す
+class PolylinePath {
+  constructor(points) {
+    // points: [{x,y}, {x,y}, ...]
+    this.points = points;
+    this.segments = [];
+    let acc = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+      const seg = new LinePath(points[i].x, points[i].y, points[i + 1].x, points[i + 1].y);
+      this.segments.push({ seg, sStart: acc });
+      acc += seg.getTotalLength();
+    }
+    this.length = acc;
+  }
+  _locate(s) {
+    for (let i = this.segments.length - 1; i >= 0; i--) {
+      if (s >= this.segments[i].sStart) {
+        return { seg: this.segments[i].seg, localS: s - this.segments[i].sStart };
+      }
+    }
+    return { seg: this.segments[0].seg, localS: 0 };
+  }
+  getPoint(s) {
+    const sc = Math.max(0, Math.min(this.length, s));
+    const { seg, localS } = this._locate(sc);
+    return seg.getPoint(localS);
+  }
+  getTangent(s) {
+    const sc = Math.max(0, Math.min(this.length, s));
+    const { seg } = this._locate(sc);
+    return seg.getTangent(0);
+  }
+  getTotalLength() { return this.length; }
+  nearestPointS(p) {
+    let bestS = 0, bestD = Infinity;
+    for (const { seg, sStart } of this.segments) {
+      const ls = seg.nearestPointS(p);
+      const pt = seg.getPoint(ls);
+      const d = dist(pt, p);
+      if (d < bestD) { bestD = d; bestS = sStart + ls; }
+    }
+    return bestS;
+  }
+  sample(_n = 2) { return this.points; }
+}
+
+/* =========================================================
+ * [SECTION 3] Controller クラス群
+ * ========================================================= */
+// 各コントローラは update(state, goal, path, dt) → {v, omega, debug} を返す。
+// state: {x, y, theta}
+// goal:  {x, y, theta}
+// path:  Path インスタンス
+// debug: 可視化用の補助情報(任意)
+
+// ---------- 極座標モデル ----------
+//   v_raw = k_ρ · ρ
+//   v     = clip(v_raw, v_min, v_max)        ← サチュレーションで実用化
+//   ω     = k_α · α + k_β · β
+//
+// v_min を 0 にすれば理論通りの「ρに比例して0に漸近」、
+// v_min > 0 でサイクルタイム重視の実用モードになる。
+class PolarController {
+  constructor(params) {
+    this.k_rho = params.k_rho;
+    this.k_alpha = params.k_alpha;
+    this.k_beta = params.k_beta;
+    this.v_max = params.v_max ?? 0.8;
+    this.v_min = params.v_min ?? 0.0;
+  }
+  setParams(p) {
+    this.k_rho = p.k_rho;
+    this.k_alpha = p.k_alpha;
+    this.k_beta = p.k_beta;
+    if (p.v_max !== undefined) this.v_max = p.v_max;
+    if (p.v_min !== undefined) this.v_min = p.v_min;
+  }
+  update(state, goal, _path, _dt) {
+    // デカルト経由で呼ばれた場合は (ρ, α, β) を計算してから updateFromPolar に委譲
+    const dx = goal.x - state.x;
+    const dy = goal.y - state.y;
+    const rho = Math.hypot(dx, dy);
+    const gamma = Math.atan2(dy, dx);
+    const alpha = normalizeAngle(gamma - state.theta);
+    const beta  = normalizeAngle(goal.theta - gamma);
+    return this.updateFromPolar({ rho, alpha, beta });
+  }
+
+  // 極座標状態 (ρ, α, β) のみを使う制御則。PolarSimulator から直接呼ばれる。
+  updateFromPolar({ rho, alpha, beta }) {
+    const v_raw = this.k_rho * rho;
+    const v = Math.max(this.v_min, Math.min(this.v_max, v_raw));
+    const omega = this.k_alpha * alpha + this.k_beta * beta;
+    return {
+      v, omega,
+      debug: { rho, alpha, beta, v_raw }
+    };
+  }
+}
+
+// ---------- キャロットチェイシング ----------
+//   LookAheadPoint = パス最近傍点から (v_target × t_lookahead) 進んだ点
+//   η = LAP方向 − ロボット向き
+//   ω = K_p·η + K_i·∫η dt       (積分項は有効/無効切替可能)
+//   v = v_target (パスごとに定義)
+class CarrotController {
+  constructor(params) {
+    this.t_lookahead = params.t_lookahead;
+    this.k_p = params.k_p;
+    this.k_i = params.k_i;
+    this.useIntegral = params.useIntegral;
+    this.v_max = params.v_max ?? 0.8;
+    this.v_min = params.v_min ?? 0.0;
+    this.reset();
+  }
+  setParams(p) {
+    this.t_lookahead = p.t_lookahead;
+    this.k_p = p.k_p;
+    this.k_i = p.k_i;
+    this.useIntegral = p.useIntegral;
+    if (p.v_max !== undefined) this.v_max = p.v_max;
+    if (p.v_min !== undefined) this.v_min = p.v_min;
+  }
+  reset() {
+    this.integ = 0;
+  }
+  update(state, goal, path, dt) {
+    // 1. 最近傍点
+    const sNear = path.nearestPointS({ x: state.x, y: state.y });
+
+    // 2. v_target: パス残距離に応じた線形減速 + サチュレーション
+    const totalLen = path.getTotalLength();
+    const remaining = Math.max(0, totalLen - sNear);
+    const v_raw = this.v_max * (remaining / totalLen);
+    const v_target = Math.max(this.v_min, Math.min(this.v_max, v_raw));
+
+    // 3. LookAheadPoint
+    const L = v_target * this.t_lookahead;
+    const sLAP = Math.min(path.getTotalLength(), sNear + L);
+    const LAP = path.getPoint(sLAP);
+
+    // 4. η
+    const eta = normalizeAngle(
+      Math.atan2(LAP.y - state.y, LAP.x - state.x) - state.theta
+    );
+
+    // 5. 積分項
+    if (this.useIntegral) {
+      this.integ += eta * dt;
+    }
+
+    const omega = this.k_p * eta + (this.useIntegral ? this.k_i * this.integ : 0);
+
+    // 6. ゴール姿勢偏差 β を参考値として計算(プロット用。制御には使わない)
+    const dx = goal.x - state.x;
+    const dy = goal.y - state.y;
+    const gamma = Math.atan2(dy, dx);
+    const beta = normalizeAngle(goal.theta - gamma);
+
+    return {
+      v: v_target,
+      omega,
+      debug: { sNear, sLAP, LAP, eta, beta, integ: this.integ, rho: Math.hypot(dx, dy) }
+    };
+  }
+}
+
+/* =========================================================
+ * [SECTION 4] Simulator
+ * ========================================================= */
+// 1ロボット分のシミュレーションを保持。ツイン構成で2つ並走させる。
+class Simulator {
+  constructor(config) {
+    this.controller = config.controller;     // Controller instance
+    this.path = config.path;                 // Path instance
+    this.goal = config.goal;                 // {x, y, theta}
+    this.initialState = { ...config.initialState };
+    this.reset();
+  }
+
+  setController(ctrl) { this.controller = ctrl; }
+  setPath(p) { this.path = p; }
+  setGoal(g) { this.goal = g; }
+  setInitialState(s) { this.initialState = { ...s }; this.reset(); }
+
+  reset() {
+    this.state = { ...this.initialState };  // {x, y, theta}
+    this.t = 0;
+    this.lastCmd = { v: 0, omega: 0, debug: {} };
+    this.history = {
+      t: [],
+      x: [],
+      y: [],
+      theta: [],
+      v: [],
+      omega: [],
+      rho: [],
+      alpha: [],
+      beta: [],
+    };
+    this.finished = false;
+    if (this.controller.reset) this.controller.reset();
+    this._recordStep();  // 初期状態を1点記録
+  }
+
+  _recordStep() {
+    // 現在状態 + ゴールとの角度差を記録
+    const dx = this.goal.x - this.state.x;
+    const dy = this.goal.y - this.state.y;
+    const rho = Math.hypot(dx, dy);
+    const gamma = Math.atan2(dy, dx);
+    const alpha = normalizeAngle(gamma - this.state.theta);
+    const beta = normalizeAngle(this.goal.theta - gamma);
+
+    this.history.t.push(this.t);
+    this.history.x.push(this.state.x);
+    this.history.y.push(this.state.y);
+    this.history.theta.push(this.state.theta);
+    this.history.v.push(this.lastCmd.v);
+    this.history.omega.push(this.lastCmd.omega);
+    this.history.rho.push(rho);
+    this.history.alpha.push(alpha);
+    this.history.beta.push(beta);
+  }
+
+  // 1ステップ進める
+  step(dt) {
+    if (this.finished) return;
+
+    // 1. コントローラから指令を得る
+    const cmd = this.controller.update(this.state, this.goal, this.path, dt);
+    this.lastCmd = cmd;
+
+    // 2. 理想差動二輪キネマティクスで状態更新 (Euler)
+    this.state.x += cmd.v * Math.cos(this.state.theta) * dt;
+    this.state.y += cmd.v * Math.sin(this.state.theta) * dt;
+    this.state.theta = normalizeAngle(this.state.theta + cmd.omega * dt);
+
+    this.t += dt;
+    this._recordStep();
+
+    // 3. 終了条件
+    const rho = this.history.rho[this.history.rho.length - 1];
+    if (rho < 0.005 || this.t > 10) {
+      this.finished = true;
+    }
+  }
+}
+
+// ---------- 極座標モデル専用 Simulator ----------
+// 状態を (ρ, α, β) で保持し、Aicardi の極座標キネマティクスを直接積分する。
+//   ρ̇ = -v · cos α
+//   α̇ = (v · sin α) / ρ - ω
+//   β̇ = -(v · sin α) / ρ
+// これにより「状態 = 目標からの偏差」という極座標モデルの定義に忠実になる。
+// 表示用の (x, y, θ) は (ρ, α, β) + ゴール から毎ステップ導出する。
+class PolarSimulator {
+  constructor(config) {
+    this.controller = config.controller;
+    this.path = config.path;            // 極座標シムでは使用しない(インターフェース互換のため保持)
+    this.goal = config.goal;            // {x, y, theta}
+    this.initialState = { ...config.initialState }; // {x, y, theta} (UI統一のため)
+    this.reset();
+  }
+
+  setController(ctrl) { this.controller = ctrl; }
+  setPath(p) { this.path = p; }
+  setGoal(g) { this.goal = g; this.reset(); }
+  setInitialState(s) { this.initialState = { ...s }; this.reset(); }
+
+  _cartesianToPolar(cart) {
+    const dx = this.goal.x - cart.x;
+    const dy = this.goal.y - cart.y;
+    const rho = Math.hypot(dx, dy);
+    const gamma = Math.atan2(dy, dx);
+    const alpha = normalizeAngle(gamma - cart.theta);
+    const beta  = normalizeAngle(this.goal.theta - gamma);
+    return { rho, alpha, beta };
+  }
+
+  _polarToCartesian() {
+    const { rho, alpha, beta } = this.polarState;
+    // β = goal.theta - γ  ⇒  γ = goal.theta - β
+    const gamma = normalizeAngle(this.goal.theta - beta);
+    const x = this.goal.x - rho * Math.cos(gamma);
+    const y = this.goal.y - rho * Math.sin(gamma);
+    // α = γ - θ  ⇒  θ = γ - α
+    const theta = normalizeAngle(gamma - alpha);
+    return { x, y, theta };
+  }
+
+  reset() {
+    this.polarState = this._cartesianToPolar(this.initialState);  // 真の状態
+    this.state = this._polarToCartesian();                         // 表示用の導出
+    this.t = 0;
+    this.lastCmd = { v: 0, omega: 0, debug: {} };
+    this.history = {
+      t: [], x: [], y: [], theta: [],
+      v: [], omega: [],
+      rho: [], alpha: [], beta: [],
+    };
+    this.finished = false;
+    if (this.controller.reset) this.controller.reset();
+    this._recordStep();
+  }
+
+  _recordStep() {
+    const { rho, alpha, beta } = this.polarState;
+    this.history.t.push(this.t);
+    this.history.x.push(this.state.x);
+    this.history.y.push(this.state.y);
+    this.history.theta.push(this.state.theta);
+    this.history.v.push(this.lastCmd.v);
+    this.history.omega.push(this.lastCmd.omega);
+    this.history.rho.push(rho);
+    this.history.alpha.push(alpha);
+    this.history.beta.push(beta);
+  }
+
+  step(dt) {
+    if (this.finished) return;
+
+    // 1. 制御則を極座標状態で評価
+    const cmd = this.controller.updateFromPolar(this.polarState);
+    this.lastCmd = cmd;
+
+    // 2. 極座標キネマティクスで Euler 積分
+    const { rho, alpha, beta } = this.polarState;
+    const v = cmd.v;
+    const omega = cmd.omega;
+    const EPS = 1e-5;
+    if (rho > EPS) {
+      const sinA = Math.sin(alpha);
+      const cosA = Math.cos(alpha);
+      const dRho   = -v * cosA;
+      const dAlpha = (v * sinA) / rho - omega;
+      const dBeta  = -(v * sinA) / rho;
+      this.polarState.rho   = Math.max(0, rho + dRho * dt);
+      this.polarState.alpha = normalizeAngle(alpha + dAlpha * dt);
+      this.polarState.beta  = normalizeAngle(beta  + dBeta  * dt);
+    } else {
+      // ρ≈0 の特異点近傍: 並進項(sin α / ρ)を無視し、ωのみで姿勢を回す
+      this.polarState.alpha = normalizeAngle(alpha - omega * dt);
+    }
+
+    // 3. 表示用デカルト座標を更新
+    this.state = this._polarToCartesian();
+    this.t += dt;
+    this._recordStep();
+
+    // 4. 終了判定
+    if (this.polarState.rho < 0.005 || this.t > 10) {
+      this.finished = true;
+    }
+  }
+}
+
+/* =========================================================
+ * [SECTION 5] Renderer (Canvas + Chart.js)
+ * ========================================================= */
+
+// ---------- 軌跡描画 (Canvas2D) ----------
+class TrajectoryRenderer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    // world -> canvas の写像パラメータ (setViewport で設定)
+    this.ox = 0; this.oy = 0; this.scale = 100;
+  }
+
+  // パスを囲うバウンディングボックスから自動決定
+  setViewport(path, margin = 0.5) {
+    const pts = path.sample();
+    let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+    for (const p of pts) {
+      xmin = Math.min(xmin, p.x); xmax = Math.max(xmax, p.x);
+      ymin = Math.min(ymin, p.y); ymax = Math.max(ymax, p.y);
+    }
+    xmin -= margin; xmax += margin;
+    ymin -= margin; ymax += margin;
+    const w = this.canvas.width, h = this.canvas.height;
+    const sx = w / (xmax - xmin);
+    const sy = h / (ymax - ymin);
+    this.scale = Math.min(sx, sy);
+    // 中心合わせ
+    const cxWorld = (xmin + xmax) / 2;
+    const cyWorld = (ymin + ymax) / 2;
+    this.ox = w / 2 - cxWorld * this.scale;
+    this.oy = h / 2 + cyWorld * this.scale;  // Y反転
+  }
+
+  w2c(p) {
+    return { x: this.ox + p.x * this.scale, y: this.oy - p.y * this.scale };
+  }
+
+  clear() {
+    const { ctx, canvas } = this;
+    ctx.fillStyle = '#fafafa';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  drawGrid() {
+    const { ctx, canvas } = this;
+    ctx.strokeStyle = '#e8e8e8';
+    ctx.lineWidth = 1;
+    // 0.2m ごとにグリッド
+    const step = 0.2;
+    // 描画範囲の world 座標
+    const xMinW = -this.ox / this.scale;
+    const xMaxW = (canvas.width - this.ox) / this.scale;
+    const yMinW = -(canvas.height - this.oy) / this.scale;
+    const yMaxW = this.oy / this.scale;
+    const x0 = Math.floor(xMinW / step) * step;
+    const y0 = Math.floor(yMinW / step) * step;
+    ctx.beginPath();
+    for (let x = x0; x <= xMaxW; x += step) {
+      const p1 = this.w2c({ x, y: yMinW });
+      const p2 = this.w2c({ x, y: yMaxW });
+      ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+    }
+    for (let y = y0; y <= yMaxW; y += step) {
+      const p1 = this.w2c({ x: xMinW, y });
+      const p2 = this.w2c({ x: xMaxW, y });
+      ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+    }
+    ctx.stroke();
+  }
+
+  drawPath(path) {
+    const { ctx } = this;
+    const pts = path.sample();
+    ctx.strokeStyle = '#4080ff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const p = this.w2c(pts[i]);
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  }
+
+  drawRobot(state, color = '#e04030') {
+    const { ctx } = this;
+    const p = this.w2c(state);
+    const len = 0.12 * this.scale;
+    // 矩形(ボディ)
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(-state.theta); // Y反転座標系なので回転も反転
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.rect(-len * 0.6, -len * 0.5, len * 1.2, len);
+    ctx.fill(); ctx.stroke();
+    // 向き矢印
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(len * 0.9, 0);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(len * 0.9, 0);
+    ctx.lineTo(len * 0.7, -len * 0.2);
+    ctx.lineTo(len * 0.7, len * 0.2);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawGoal(goal) {
+    const { ctx } = this;
+    const p = this.w2c(goal);
+    const len = 0.15 * this.scale;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(-goal.theta);
+    // ゴール位置マーカー (円)
+    ctx.strokeStyle = '#30a030';
+    ctx.fillStyle = 'rgba(80, 200, 80, 0.2)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, len * 0.35, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    // 目標姿勢矢印
+    ctx.strokeStyle = '#30a030';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(len, 0);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(len, 0);
+    ctx.lineTo(len * 0.8, -len * 0.15);
+    ctx.lineTo(len * 0.8, len * 0.15);
+    ctx.closePath();
+    ctx.fillStyle = '#30a030';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawHistory(history) {
+    const { ctx } = this;
+    ctx.strokeStyle = 'rgba(224, 64, 48, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < history.x.length; i++) {
+      const p = this.w2c({ x: history.x[i], y: history.y[i] });
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  }
+
+  drawOverlayPolar(state, goal) {
+    // ρ線(ロボット→ゴール)
+    const { ctx } = this;
+    const r = this.w2c(state);
+    const g = this.w2c(goal);
+    ctx.strokeStyle = 'rgba(150,150,150,0.8)';
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(r.x, r.y);
+    ctx.lineTo(g.x, g.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  drawOverlayCarrot(state, debug) {
+    if (!debug || !debug.LAP) return;
+    const { ctx } = this;
+    const r = this.w2c(state);
+    const lap = this.w2c(debug.LAP);
+    // ロボット→LAP
+    ctx.strokeStyle = 'rgba(230,140,30,0.9)';
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(r.x, r.y);
+    ctx.lineTo(lap.x, lap.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // LAPマーカー
+    ctx.fillStyle = '#ec8020';
+    ctx.beginPath();
+    ctx.arc(lap.x, lap.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  renderAll(sim, kind /* 'polar' | 'carrot' */) {
+    this.clear();
+    this.drawGrid();
+    this.drawPath(sim.path);
+    this.drawHistory(sim.history);
+    this.drawGoal(sim.goal);
+    if (kind === 'polar') this.drawOverlayPolar(sim.state, sim.goal);
+    else if (kind === 'carrot') this.drawOverlayCarrot(sim.state, sim.lastCmd.debug);
+    this.drawRobot(sim.state);
+  }
+}
+
+// ---------- 時系列グラフ (Chart.js) ----------
+function makeLineChart(canvas, label, yLabel, color, yRange) {
+  return new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label,
+        data: [],
+        borderColor: color,
+        backgroundColor: color,
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      scales: {
+        x: {
+          type: 'linear',
+          title: { display: true, text: 't [s]', font: { size: 10 } },
+          ticks: { font: { size: 9 } },
+        },
+        y: {
+          title: { display: true, text: yLabel, font: { size: 10 } },
+          ticks: { font: { size: 9 } },
+          min: yRange ? yRange[0] : undefined,
+          max: yRange ? yRange[1] : undefined,
+        }
+      },
+      plugins: {
+        legend: { display: true, labels: { font: { size: 10 } } },
+      }
+    }
+  });
+}
+
+function updateChart(chart, tArr, yArr) {
+  const ds = chart.data.datasets[0];
+  ds.data = tArr.map((t, i) => ({ x: t, y: yArr[i] }));
+  chart.update('none');
+}
+
+/* =========================================================
+ * [SECTION 6] PATHS / PRESETS 定義 (ここに追加すれば拡張可能)
+ * ========================================================= */
+// --- パス定義 ---
+// 要素を増やすには factory を足すだけで UI に反映される。
+const PATHS = [
+  {
+    id: 'line_1.5m',
+    name: '直線 1.5m',
+    factory: () => new LinePath(0, 0, 1.5, 0),
+  },
+  // 追加例:
+  // { id: 'arc_line', name: '円弧→直線', factory: () => new PolylinePath([...]) },
+];
+
+// --- プリセット(初期条件) ---
+// pathId は PATHS の id に一致。initial は {x, y, theta}、goal も同様。
+const PRESETS = [
+  {
+    id: 'goal_heading_only',
+    name: '★ ゴール姿勢のみ +8° (比較の核心)',
+    pathId: 'line_1.5m',
+    initial: { x: 0.0, y: 0.0, theta: deg(0) },
+    goal:    { x: 1.5, y: 0.0, theta: deg(8) },
+  },
+  {
+    id: 'combined',
+    name: '複合: 角度残差 +3° & ゴール姿勢 +10°',
+    pathId: 'line_1.5m',
+    initial: { x: 0.0, y: 0.0, theta: deg(3) },
+    goal:    { x: 1.5, y: 0.0, theta: deg(10) },
+  },
+  {
+    id: 'default',
+    name: '角度残差のみ +5° (β初期=0、差がほぼ出ない)',
+    pathId: 'line_1.5m',
+    initial: { x: 0.0, y: 0.0,  theta: deg(5) },
+    goal:    { x: 1.5, y: 0.0,  theta: deg(0) },
+  },
+  {
+    id: 'offset_plus',
+    name: '横ずれ +5cm, 角度 0°',
+    pathId: 'line_1.5m',
+    initial: { x: 0.0, y: 0.05, theta: deg(0) },
+    goal:    { x: 1.5, y: 0.0,  theta: deg(0) },
+  },
+  {
+    id: 'angle_large',
+    name: '角度残差 +10°, 横ずれ -3cm',
+    pathId: 'line_1.5m',
+    initial: { x: 0.0, y: -0.03, theta: deg(10) },
+    goal:    { x: 1.5, y: 0.0,   theta: deg(0) },
+  },
+];
+
+/* =========================================================
+ * [SECTION 7] UI 初期化 + イベントハンドラ
+ * ========================================================= */
+const state = {
+  polarSim: null,
+  carrotSim: null,
+  polarRenderer: null,
+  carrotRenderer: null,
+  polarOmegaChart: null, polarBetaChart: null,
+  carrotOmegaChart: null, carrotBetaChart: null,
+  playing: false,
+  dt: 0.02,
+  speed: 1.0,
+  currentPathId: 'line_1.5m',
+  currentPresetId: 'goal_heading_only',
+  v_max: 0.8,
+  v_min: 0.0,
+  params: {
+    polar:  { k_rho: 2.0, k_alpha: 3.0, k_beta: -0.5, v_max: 0.8, v_min: 0.0 },
+    carrot: { t_lookahead: 0.5, k_p: 2.0, k_i: 0.5, useIntegral: true, v_max: 0.8, v_min: 0.0 },
+  },
+};
+
+function syncSpeedParams() {
+  state.params.polar.v_max  = state.v_max;
+  state.params.polar.v_min  = state.v_min;
+  state.params.carrot.v_max = state.v_max;
+  state.params.carrot.v_min = state.v_min;
+}
+
+function populateSelect(selectEl, items) {
+  selectEl.innerHTML = '';
+  for (const it of items) {
+    const opt = document.createElement('option');
+    opt.value = it.id;
+    opt.textContent = it.name;
+    selectEl.appendChild(opt);
+  }
+}
+
+function currentPath() {
+  const p = PATHS.find(p => p.id === state.currentPathId);
+  return p.factory();
+}
+
+function currentPreset() {
+  return PRESETS.find(p => p.id === state.currentPresetId);
+}
+
+function rebuildSimulations() {
+  const preset = currentPreset();
+  // プリセットが指定パスと異なる場合、プリセット側のパスを優先
+  if (preset.pathId) state.currentPathId = preset.pathId;
+  document.getElementById('path-select').value = state.currentPathId;
+
+  const path = currentPath();
+  const goal = preset.goal;
+  const initial = preset.initial;
+
+  const polarCtrl = new PolarController(state.params.polar);
+  const carrotCtrl = new CarrotController(state.params.carrot);
+
+  state.polarSim = new PolarSimulator({
+    controller: polarCtrl, path, goal, initialState: initial
+  });
+  state.carrotSim = new Simulator({
+    controller: carrotCtrl, path, goal, initialState: initial
+  });
+
+  // Renderer のビューポート再計算
+  state.polarRenderer.setViewport(path);
+  state.carrotRenderer.setViewport(path);
+
+  updateAllCharts();
+  renderAll();
+  updateStats();
+}
+
+function applyPolarGains() {
+  if (state.polarSim) {
+    state.polarSim.controller.setParams(state.params.polar);
+  }
+}
+function applyCarrotGains() {
+  if (state.carrotSim) {
+    state.carrotSim.controller.setParams(state.params.carrot);
+  }
+}
+
+function renderAll() {
+  state.polarRenderer.renderAll(state.polarSim, 'polar');
+  state.carrotRenderer.renderAll(state.carrotSim, 'carrot');
+}
+
+function updateAllCharts() {
+  const ps = state.polarSim, cs = state.carrotSim;
+  if (!ps || !cs) return;
+  updateChart(state.polarOmegaChart,  ps.history.t, ps.history.omega);
+  updateChart(state.polarBetaChart,   ps.history.t, ps.history.beta.map(rad2deg));
+  updateChart(state.carrotOmegaChart, cs.history.t, cs.history.omega);
+  updateChart(state.carrotBetaChart,  cs.history.t, cs.history.beta.map(rad2deg));
+}
+
+function updateStats() {
+  const ps = state.polarSim, cs = state.carrotSim;
+  const fmtLine = (sim) => {
+    const i = sim.history.t.length - 1;
+    const rho = sim.history.rho[i];
+    const alpha = rad2deg(sim.history.alpha[i]);
+    const beta = rad2deg(sim.history.beta[i]);
+    const beta_init = rad2deg(sim.history.beta[0]);
+    const omega = sim.history.omega[i];
+    const v = sim.history.v[i];
+    return `t    = ${fmt(sim.t, 2)} s
+ρ    = ${fmt(rho * 1000, 1)} mm
+α    = ${fmt(alpha, 2)} deg
+β    = ${fmt(beta, 2)} deg   (初期: ${fmt(beta_init, 2)} deg)
+v    = ${fmt(v, 3)} m/s
+ω    = ${fmt(omega, 3)} rad/s (${fmt(rad2deg(omega), 1)} deg/s)
+state: ${sim.finished ? '停止' : '走行中'}`;
+  };
+  document.getElementById('polar-stats').textContent = fmtLine(ps);
+  document.getElementById('carrot-stats').textContent = fmtLine(cs);
+}
+
+let lastFrameTime = null;
+function animate(now) {
+  if (!state.playing) { lastFrameTime = null; return; }
+  if (lastFrameTime == null) lastFrameTime = now;
+  // タブ切替や一時停止後の大きなギャップで一気に進むのを防ぐ(上限 0.1s)
+  let elapsed = (now - lastFrameTime) / 1000 * state.speed;
+  if (elapsed > 0.1) elapsed = 0.1;
+  lastFrameTime = now;
+
+  // elapsed 秒分を dt 刻みで進める
+  let remaining = elapsed;
+  while (remaining > 0) {
+    const dt = Math.min(state.dt, remaining);
+    state.polarSim.step(dt);
+    state.carrotSim.step(dt);
+    remaining -= dt;
+    if (state.polarSim.finished && state.carrotSim.finished) {
+      state.playing = false;
+      break;
+    }
+  }
+
+  renderAll();
+  updateAllCharts();
+  updateStats();
+
+  if (state.playing) requestAnimationFrame(animate);
+}
+
+function init() {
+  // Renderer 初期化
+  state.polarRenderer  = new TrajectoryRenderer(document.getElementById('polar-traj'));
+  state.carrotRenderer = new TrajectoryRenderer(document.getElementById('carrot-traj'));
+
+  // Chart 初期化
+  state.polarOmegaChart  = makeLineChart(document.getElementById('polar-omega-chart'),
+    'ω指令 [rad/s]', 'ω [rad/s]', '#06c', [-2.0, 2.0]);
+  state.polarBetaChart   = makeLineChart(document.getElementById('polar-beta-chart'),
+    'β (姿勢偏差) [deg]', 'β [deg]', '#c40', [-12, 12]);
+  state.carrotOmegaChart = makeLineChart(document.getElementById('carrot-omega-chart'),
+    'ω指令 [rad/s]', 'ω [rad/s]', '#06c', [-2.0, 2.0]);
+  state.carrotBetaChart  = makeLineChart(document.getElementById('carrot-beta-chart'),
+    'β (姿勢偏差) [deg]', 'β [deg]', '#c40', [-12, 12]);
+
+  // セレクトボックスに項目投入
+  populateSelect(document.getElementById('path-select'),   PATHS);
+  populateSelect(document.getElementById('preset-select'), PRESETS);
+  document.getElementById('path-select').value   = state.currentPathId;
+  document.getElementById('preset-select').value = state.currentPresetId;
+
+  // セレクト変更イベント
+  document.getElementById('path-select').addEventListener('change', (e) => {
+    state.currentPathId = e.target.value;
+    rebuildSimulations();
+  });
+  document.getElementById('preset-select').addEventListener('change', (e) => {
+    state.currentPresetId = e.target.value;
+    rebuildSimulations();
+  });
+
+  // ボタン
+  document.getElementById('btn-play').addEventListener('click', () => {
+    if (state.polarSim.finished && state.carrotSim.finished) return;
+    if (!state.playing) {
+      state.playing = true;
+      lastFrameTime = null;       // 再生再開時は経過時間をリセット
+      requestAnimationFrame(animate);
+    }
+  });
+  document.getElementById('btn-pause').addEventListener('click', () => {
+    state.playing = false;
+    lastFrameTime = null;
+  });
+  document.getElementById('btn-step').addEventListener('click', () => {
+    state.playing = false;
+    lastFrameTime = null;
+    state.polarSim.step(state.dt);
+    state.carrotSim.step(state.dt);
+    renderAll();
+    updateAllCharts();
+    updateStats();
+  });
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    state.playing = false;
+    lastFrameTime = null;
+    rebuildSimulations();
+  });
+
+  // パラメータスライダー
+  const bindSlider = (id, valId, setter, fmtFn = (v) => v.toFixed(2)) => {
+    const el = document.getElementById(id);
+    const valEl = document.getElementById(valId);
+    el.addEventListener('input', () => {
+      const v = parseFloat(el.value);
+      valEl.textContent = fmtFn(v);
+      setter(v);
+    });
+  };
+  bindSlider('k-rho',   'k-rho-val',   v => { state.params.polar.k_rho = v; applyPolarGains(); });
+  bindSlider('k-alpha', 'k-alpha-val', v => { state.params.polar.k_alpha = v; applyPolarGains(); });
+  bindSlider('k-beta',  'k-beta-val',  v => { state.params.polar.k_beta = v; applyPolarGains(); });
+  bindSlider('t-look',  't-look-val',  v => { state.params.carrot.t_lookahead = v; applyCarrotGains(); });
+  bindSlider('k-p',     'k-p-val',     v => { state.params.carrot.k_p = v; applyCarrotGains(); });
+  bindSlider('k-i',     'k-i-val',     v => { state.params.carrot.k_i = v; applyCarrotGains(); });
+  bindSlider('v-max',   'v-max-val',   v => {
+    state.v_max = v; syncSpeedParams(); applyPolarGains(); applyCarrotGains();
+  });
+  bindSlider('v-min',   'v-min-val',   v => {
+    state.v_min = v; syncSpeedParams(); applyPolarGains(); applyCarrotGains();
+  });
+  bindSlider('dt',      'dt-val',      v => { state.dt = v; }, (v) => v.toFixed(3));
+  bindSlider('speed',   'speed-val',   v => { state.speed = v; }, (v) => v.toFixed(2) + 'x');
+
+  document.getElementById('carrot-use-i').addEventListener('change', (e) => {
+    state.params.carrot.useIntegral = e.target.checked;
+    applyCarrotGains();
+  });
+
+  // 初期構築
+  rebuildSimulations();
+}
+
+// DOM 読込完了後に起動
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+</script>
+
+</body>
+</html>
