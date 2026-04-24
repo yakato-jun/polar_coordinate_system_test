@@ -165,7 +165,8 @@
     </div>
 
     <div class="note">
-      ω_cmd と β を縦に並べて比較。キャロットは β がまだ残る段階で ω_cmd が 0 近くに張り付く。極座標は β に比例した ω が出続ける。
+      ω_cmd と β を縦に並べて比較。キャロットは β がまだ残る段階で ω_cmd が 0 近くに張り付く。極座標は β に比例した ω が出続ける。<br><br>
+      <b>極座標側の内部状態</b>は (ρ, α, β) で保持し、極座標キネマティクスを直接積分している。(x,y,θ) はそこから導出した表示用。
     </div>
 
   </div>
@@ -317,20 +318,24 @@ class PolarController {
     if (p.v_min !== undefined) this.v_min = p.v_min;
   }
   update(state, goal, _path, _dt) {
+    // デカルト経由で呼ばれた場合は (ρ, α, β) を計算してから updateFromPolar に委譲
     const dx = goal.x - state.x;
     const dy = goal.y - state.y;
     const rho = Math.hypot(dx, dy);
-    const gamma = Math.atan2(dy, dx);                     // ロボット位置から見たゴール方向
-    const alpha = normalizeAngle(gamma - state.theta);    // ロボット向きからの差
-    const beta  = normalizeAngle(goal.theta - gamma);     // ゴール方向からゴール姿勢への差
+    const gamma = Math.atan2(dy, dx);
+    const alpha = normalizeAngle(gamma - state.theta);
+    const beta  = normalizeAngle(goal.theta - gamma);
+    return this.updateFromPolar({ rho, alpha, beta });
+  }
 
+  // 極座標状態 (ρ, α, β) のみを使う制御則。PolarSimulator から直接呼ばれる。
+  updateFromPolar({ rho, alpha, beta }) {
     const v_raw = this.k_rho * rho;
     const v = Math.max(this.v_min, Math.min(this.v_max, v_raw));
     const omega = this.k_alpha * alpha + this.k_beta * beta;
-
     return {
       v, omega,
-      debug: { rho, alpha, beta, gamma, v_raw }
+      debug: { rho, alpha, beta, v_raw }
     };
   }
 }
@@ -431,8 +436,9 @@ class Simulator {
       theta: [],
       v: [],
       omega: [],
-      beta: [],
       rho: [],
+      alpha: [],
+      beta: [],
     };
     this.finished = false;
     if (this.controller.reset) this.controller.reset();
@@ -443,9 +449,10 @@ class Simulator {
     // 現在状態 + ゴールとの角度差を記録
     const dx = this.goal.x - this.state.x;
     const dy = this.goal.y - this.state.y;
-    const gamma = Math.atan2(dy, dx);
-    const beta = normalizeAngle(this.goal.theta - gamma);
     const rho = Math.hypot(dx, dy);
+    const gamma = Math.atan2(dy, dx);
+    const alpha = normalizeAngle(gamma - this.state.theta);
+    const beta = normalizeAngle(this.goal.theta - gamma);
 
     this.history.t.push(this.t);
     this.history.x.push(this.state.x);
@@ -453,8 +460,9 @@ class Simulator {
     this.history.theta.push(this.state.theta);
     this.history.v.push(this.lastCmd.v);
     this.history.omega.push(this.lastCmd.omega);
-    this.history.beta.push(beta);
     this.history.rho.push(rho);
+    this.history.alpha.push(alpha);
+    this.history.beta.push(beta);
   }
 
   // 1ステップ進める
@@ -476,6 +484,114 @@ class Simulator {
     // 3. 終了条件
     const rho = this.history.rho[this.history.rho.length - 1];
     if (rho < 0.005 || this.t > 10) {
+      this.finished = true;
+    }
+  }
+}
+
+// ---------- 極座標モデル専用 Simulator ----------
+// 状態を (ρ, α, β) で保持し、Aicardi の極座標キネマティクスを直接積分する。
+//   ρ̇ = -v · cos α
+//   α̇ = (v · sin α) / ρ - ω
+//   β̇ = -(v · sin α) / ρ
+// これにより「状態 = 目標からの偏差」という極座標モデルの定義に忠実になる。
+// 表示用の (x, y, θ) は (ρ, α, β) + ゴール から毎ステップ導出する。
+class PolarSimulator {
+  constructor(config) {
+    this.controller = config.controller;
+    this.path = config.path;            // 極座標シムでは使用しない(インターフェース互換のため保持)
+    this.goal = config.goal;            // {x, y, theta}
+    this.initialState = { ...config.initialState }; // {x, y, theta} (UI統一のため)
+    this.reset();
+  }
+
+  setController(ctrl) { this.controller = ctrl; }
+  setPath(p) { this.path = p; }
+  setGoal(g) { this.goal = g; this.reset(); }
+  setInitialState(s) { this.initialState = { ...s }; this.reset(); }
+
+  _cartesianToPolar(cart) {
+    const dx = this.goal.x - cart.x;
+    const dy = this.goal.y - cart.y;
+    const rho = Math.hypot(dx, dy);
+    const gamma = Math.atan2(dy, dx);
+    const alpha = normalizeAngle(gamma - cart.theta);
+    const beta  = normalizeAngle(this.goal.theta - gamma);
+    return { rho, alpha, beta };
+  }
+
+  _polarToCartesian() {
+    const { rho, alpha, beta } = this.polarState;
+    // β = goal.theta - γ  ⇒  γ = goal.theta - β
+    const gamma = normalizeAngle(this.goal.theta - beta);
+    const x = this.goal.x - rho * Math.cos(gamma);
+    const y = this.goal.y - rho * Math.sin(gamma);
+    // α = γ - θ  ⇒  θ = γ - α
+    const theta = normalizeAngle(gamma - alpha);
+    return { x, y, theta };
+  }
+
+  reset() {
+    this.polarState = this._cartesianToPolar(this.initialState);  // 真の状態
+    this.state = this._polarToCartesian();                         // 表示用の導出
+    this.t = 0;
+    this.lastCmd = { v: 0, omega: 0, debug: {} };
+    this.history = {
+      t: [], x: [], y: [], theta: [],
+      v: [], omega: [],
+      rho: [], alpha: [], beta: [],
+    };
+    this.finished = false;
+    if (this.controller.reset) this.controller.reset();
+    this._recordStep();
+  }
+
+  _recordStep() {
+    const { rho, alpha, beta } = this.polarState;
+    this.history.t.push(this.t);
+    this.history.x.push(this.state.x);
+    this.history.y.push(this.state.y);
+    this.history.theta.push(this.state.theta);
+    this.history.v.push(this.lastCmd.v);
+    this.history.omega.push(this.lastCmd.omega);
+    this.history.rho.push(rho);
+    this.history.alpha.push(alpha);
+    this.history.beta.push(beta);
+  }
+
+  step(dt) {
+    if (this.finished) return;
+
+    // 1. 制御則を極座標状態で評価
+    const cmd = this.controller.updateFromPolar(this.polarState);
+    this.lastCmd = cmd;
+
+    // 2. 極座標キネマティクスで Euler 積分
+    const { rho, alpha, beta } = this.polarState;
+    const v = cmd.v;
+    const omega = cmd.omega;
+    const EPS = 1e-5;
+    if (rho > EPS) {
+      const sinA = Math.sin(alpha);
+      const cosA = Math.cos(alpha);
+      const dRho   = -v * cosA;
+      const dAlpha = (v * sinA) / rho - omega;
+      const dBeta  = -(v * sinA) / rho;
+      this.polarState.rho   = Math.max(0, rho + dRho * dt);
+      this.polarState.alpha = normalizeAngle(alpha + dAlpha * dt);
+      this.polarState.beta  = normalizeAngle(beta  + dBeta  * dt);
+    } else {
+      // ρ≈0 の特異点近傍: 並進項(sin α / ρ)を無視し、ωのみで姿勢を回す
+      this.polarState.alpha = normalizeAngle(alpha - omega * dt);
+    }
+
+    // 3. 表示用デカルト座標を更新
+    this.state = this._polarToCartesian();
+    this.t += dt;
+    this._recordStep();
+
+    // 4. 終了判定
+    if (this.polarState.rho < 0.005 || this.t > 10) {
       this.finished = true;
     }
   }
@@ -843,7 +959,7 @@ function rebuildSimulations() {
   const polarCtrl = new PolarController(state.params.polar);
   const carrotCtrl = new CarrotController(state.params.carrot);
 
-  state.polarSim = new Simulator({
+  state.polarSim = new PolarSimulator({
     controller: polarCtrl, path, goal, initialState: initial
   });
   state.carrotSim = new Simulator({
@@ -889,11 +1005,13 @@ function updateStats() {
   const fmtLine = (sim) => {
     const i = sim.history.t.length - 1;
     const rho = sim.history.rho[i];
+    const alpha = rad2deg(sim.history.alpha[i]);
     const beta = rad2deg(sim.history.beta[i]);
     const omega = sim.history.omega[i];
     const v = sim.history.v[i];
     return `t    = ${fmt(sim.t, 2)} s
 ρ    = ${fmt(rho * 1000, 1)} mm
+α    = ${fmt(alpha, 2)} deg
 β    = ${fmt(beta, 2)} deg
 v    = ${fmt(v, 3)} m/s
 ω    = ${fmt(omega, 3)} rad/s (${fmt(rad2deg(omega), 1)} deg/s)
