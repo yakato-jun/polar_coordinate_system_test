@@ -207,26 +207,26 @@
 
     <div class="section-box">
       <h3>極座標ゲイン</h3>
-      <div class="row"><label>k_ρ <span class="val" id="k-rho-val">2.00</span>
-        <input type="range" id="k-rho" min="0.1" max="5" step="0.05" value="2.0"></label></div>
-      <div class="row"><label>k_α <span class="val" id="k-alpha-val">3.00</span>
-        <input type="range" id="k-alpha" min="0.1" max="8" step="0.1" value="3.0"></label></div>
-      <div class="row"><label>k_β <span class="val" id="k-beta-val">-0.50</span>
-        <input type="range" id="k-beta" min="-3" max="-0.05" step="0.05" value="-0.5"></label></div>
+      <div class="row"><label>k_ρ <span class="val" id="k-rho-val">1.70</span>
+        <input type="range" id="k-rho" min="0.1" max="5" step="0.05" value="1.7"></label></div>
+      <div class="row"><label>k_α <span class="val" id="k-alpha-val">4.50</span>
+        <input type="range" id="k-alpha" min="0.1" max="8" step="0.1" value="4.5"></label></div>
+      <div class="row"><label>k_β <span class="val" id="k-beta-val">-2.00</span>
+        <input type="range" id="k-beta" min="-3" max="-0.05" step="0.05" value="-2.0"></label></div>
     </div>
 
     <div class="section-box">
       <h3>速度サチュレーション</h3>
-      <div class="row"><label>v_max [m/s] <span class="val" id="v-max-val">0.80</span>
-        <input type="range" id="v-max" min="0.1" max="1.5" step="0.05" value="0.8"></label></div>
+      <div class="row"><label>v_max [m/s] <span class="val" id="v-max-val">0.70</span>
+        <input type="range" id="v-max" min="0.1" max="1.5" step="0.05" value="0.7"></label></div>
       <div class="row"><label>v_min [m/s] <span class="val" id="v-min-val">0.00</span>
         <input type="range" id="v-min" min="0.0" max="0.3" step="0.01" value="0.00"></label></div>
     </div>
 
     <div class="section-box">
       <h3>シミュレーション</h3>
-      <div class="row"><label>dt [s] <span class="val" id="dt-val">0.02</span>
-        <input type="range" id="dt" min="0.005" max="0.05" step="0.005" value="0.02"></label></div>
+      <div class="row"><label>dt [s] <span class="val" id="dt-val">0.005</span>
+        <input type="range" id="dt" min="0.001" max="0.05" step="0.001" value="0.005"></label></div>
       <div class="row"><label>再生速度 <span class="val" id="speed-val">1.0x</span>
         <input type="range" id="speed" min="0.1" max="4" step="0.1" value="1.0"></label></div>
       <div class="row"><label>ρ終了閾値 [mm] <span class="val" id="rho-th-val">5</span>
@@ -875,13 +875,13 @@ const state = {
   chartV: null,
   chartOmega: null,
   playing: false,
-  dt: 0.02,
+  dt: 0.005,
   speed: 1.0,
   currentPathId: 'line_1.5m',
   currentPresetId: 'handoff_typical',
   rho_threshold: 0.005,
   showGhost: true,                // k_β=0 のゴースト軌跡を重ねて描画するか
-  params: { k_rho: 2.0, k_alpha: 3.0, k_beta: -0.5, v_max: 0.8, v_min: 0.0 },
+  params: { k_rho: 1.7, k_alpha: 4.5, k_beta: -2.0, v_max: 0.7, v_min: 0.0 },
 };
 
 function populateSelect(sel, items) {
