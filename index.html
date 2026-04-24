@@ -168,8 +168,17 @@
       <b>読み方:</b>
       <span class="legend-swatch bar-rho"></span>k_ρ·ρ → v_x を生む唯一の項。
       <span class="legend-swatch bar-alpha"></span>k_α·α → ω_z を通じて「ゴール方向に頭を向ける」仕事。
-      <span class="legend-swatch bar-beta"></span>k_β·β → ω_z を通じて「ゴール姿勢に合わせる」仕事。<br>
-      <b>物語:</b> 序盤はρ大→v_x飽和、α大→ω主に向き合わせ。 中盤は v_x 線形域に入りα残差減少、ω主役が β項へ移行。 終盤は α, β 共に小さくなりつつ ρ 連動で詰まる。
+      <span class="legend-swatch bar-beta"></span>k_β·β → ω_z を通じて「ゴール姿勢に合わせる」仕事。<br><br>
+
+      <b>軌跡ビューの見方:</b><br>
+      <span style="color:#e04030">赤実線+赤矢印</span> = 通常の極座標モデル (β項あり)<br>
+      <span style="color:#888">灰色破線+灰色矢印</span> = ゴースト(k_β=0 にした場合の挙動。β項が何をしているかが一目で分かる比較)<br>
+      <span style="color:#30a030">緑の破線</span> = ゴール目標姿勢の延長線 (通常軌跡の向きが最後にこれに揃う)<br><br>
+
+      <b>k_β を強くすると何が起きるか:</b><br>
+      ・スライダーで k_β の絶対値を上げる → ゴール手前から「姿勢が合う形」で進入しようとする<br>
+      ・ゴーストと通常軌跡の乖離が大きくなる = β項の仕事量が大きい<br>
+      ・k_β = 0 (= ゴースト) では姿勢誤差が残ってゴール到着する
     </div>
 
   </div>
@@ -222,6 +231,9 @@
         <input type="range" id="speed" min="0.25" max="4" step="0.25" value="1.0"></label></div>
       <div class="row"><label>ρ終了閾値 [mm] <span class="val" id="rho-th-val">5</span>
         <input type="range" id="rho-th" min="0.1" max="50" step="0.1" value="5"></label></div>
+      <div class="row">
+        <label><input type="checkbox" id="show-ghost" checked> ゴースト軌跡 (k_β=0 の比較) を表示</label>
+      </div>
     </div>
 
     <div class="note" style="margin-top:10px">
@@ -546,16 +558,64 @@ class TrajectoryRenderer {
     ctx.fillStyle = '#30a030'; ctx.fill();
     ctx.restore();
   }
-  drawHistory(history) {
+  drawHistory(history, opts = {}) {
     const { ctx } = this;
-    ctx.strokeStyle = 'rgba(224,64,48,0.4)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = opts.color ?? 'rgba(224,64,48,0.55)';
+    ctx.lineWidth = opts.width ?? 1.5;
+    if (opts.dash) ctx.setLineDash(opts.dash); else ctx.setLineDash([]);
     ctx.beginPath();
     for (let i = 0; i < history.x.length; i++) {
       const p = this.w2c({ x: history.x[i], y: history.y[i] });
       if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
     }
     ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 軌跡に沿って等間隔に向き矢印を打つ
+  drawHistoryHeadingArrows(history, opts = {}) {
+    const { ctx } = this;
+    const stepEvery = opts.stepEvery ?? 8;           // N ステップごと
+    const armLen = (opts.armLen ?? 0.07) * this.scale;
+    const color = opts.color ?? 'rgba(224,64,48,0.75)';
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < history.x.length; i += stepEvery) {
+      const p = this.w2c({ x: history.x[i], y: history.y[i] });
+      const th = history.theta[i];
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(-th);
+      ctx.beginPath();
+      ctx.moveTo(0, 0); ctx.lineTo(armLen, 0);
+      ctx.stroke();
+      // 小さな矢じり
+      ctx.beginPath();
+      ctx.moveTo(armLen, 0);
+      ctx.lineTo(armLen - armLen * 0.3, -armLen * 0.2);
+      ctx.lineTo(armLen - armLen * 0.3,  armLen * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // ゴールの目標姿勢を延長線として描画
+  drawGoalHeadingLine(goal, lengthBack = 0.8) {
+    const { ctx } = this;
+    const g = this.w2c(goal);
+    const backLen = lengthBack * this.scale;
+    const dx = -Math.cos(goal.theta) * backLen;
+    const dy =  Math.sin(goal.theta) * backLen;  // Y反転座標系
+    ctx.strokeStyle = 'rgba(48,160,48,0.4)';
+    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(g.x, g.y);
+    ctx.lineTo(g.x + dx, g.y + dy);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
   // ρ 線 (ロボット -> ゴール) と α, β の角度を矢印で示す
   drawOverlays(pose, goal) {
@@ -743,41 +803,41 @@ const PATHS = [
 ];
 
 // 初期条件: initialPose (x,y,θ) と goal (x,y,θ)
-// ρ, α, β を狙って動かせるように、意図的な組合せを用意。
+// 「現実的な引継ぎ状態」を先頭にして、残りは実験用。
 const PRESETS = [
   {
-    id: 'typical',
-    name: '典型: ρ=1.5m, α=-5°, β=+8° (色々混じる)',
+    id: 'handoff_typical',
+    name: '★ 実運用: 横ずれ+5cm, 角度+2°, ゴール姿勢=経路方向',
+    pathId: 'line_1.5m',
+    initialPose: { x: 0.0, y: 0.05, theta: deg(2) },
+    goal:        { x: 1.5, y: 0.0, theta: deg(0) },
+  },
+  {
+    id: 'handoff_offset_only',
+    name: '実運用: 横ずれ+10cm のみ, ゴール姿勢=経路方向',
+    pathId: 'line_1.5m',
+    initialPose: { x: 0.0, y: 0.10, theta: deg(0) },
+    goal:        { x: 1.5, y: 0.0, theta: deg(0) },
+  },
+  {
+    id: 'handoff_angle_only',
+    name: '実運用: 角度残差+5° のみ, ゴール姿勢=経路方向',
     pathId: 'line_1.5m',
     initialPose: { x: 0.0, y: 0.0, theta: deg(5) },
-    goal:        { x: 1.5, y: 0.0, theta: deg(8) },
+    goal:        { x: 1.5, y: 0.0, theta: deg(0) },
   },
   {
     id: 'only_beta',
-    name: 'βのみ: α=0, β=+10° (β項単独の効き)',
+    name: '実験: βのみ α=0, β=+10° (ゴール姿勢が傾いた例外ケース)',
     pathId: 'line_1.5m',
     initialPose: { x: 0.0, y: 0.0, theta: deg(0) },
     goal:        { x: 1.5, y: 0.0, theta: deg(10) },
   },
   {
     id: 'only_alpha',
-    name: 'αのみ: α=+15°, β=0 (α項単独の効き)',
+    name: '実験: αのみ α=+15°, β=0',
     pathId: 'line_1.5m',
-    initialPose: { x: 0.0, y: 0.0, theta: deg(-15) },  // 向きがずれてゴールを見ている
-    goal:        { x: 1.5, y: 0.0, theta: deg(0) },
-  },
-  {
-    id: 'large_beta',
-    name: '大きなβ: β=+20° (終盤のβ項支配を確認)',
-    pathId: 'line_1.5m',
-    initialPose: { x: 0.0, y: 0.0, theta: deg(0) },
-    goal:        { x: 1.5, y: 0.0, theta: deg(20) },
-  },
-  {
-    id: 'offset',
-    name: '横ずれ+10cm (αとβが自然に発生)',
-    pathId: 'line_1.5m',
-    initialPose: { x: 0.0, y: 0.10, theta: deg(0) },
+    initialPose: { x: 0.0, y: 0.0, theta: deg(-15) },
     goal:        { x: 1.5, y: 0.0, theta: deg(0) },
   },
 ];
@@ -787,6 +847,7 @@ const PRESETS = [
  * ========================================================= */
 const state = {
   sim: null,
+  ghostSim: null,                 // k_β = 0 で走らせる比較用シム
   renderer: null,
   chartErrors: null,
   chartV: null,
@@ -795,8 +856,9 @@ const state = {
   dt: 0.02,
   speed: 1.0,
   currentPathId: 'line_1.5m',
-  currentPresetId: 'typical',
+  currentPresetId: 'handoff_typical',
   rho_threshold: 0.005,
+  showGhost: true,                // k_β=0 のゴースト軌跡を重ねて描画するか
   params: { k_rho: 2.0, k_alpha: 3.0, k_beta: -0.5, v_max: 0.8, v_min: 0.0 },
 };
 
@@ -828,7 +890,16 @@ function rebuildSim() {
     initialPose: preset.initialPose,
     rho_threshold: state.rho_threshold,
   });
-  state.sim.path_for_view = path;  // 軌跡ビュー用の参考パス
+  state.sim.path_for_view = path;
+
+  // ゴースト: k_β = 0 で同じ初期条件を走らせる(β項なしの挙動)
+  const ghostCtrl = new PolarController({ ...state.params, k_beta: 0 });
+  state.ghostSim = new PolarSimulator({
+    controller: ghostCtrl,
+    goal: preset.goal,
+    initialPose: preset.initialPose,
+    rho_threshold: state.rho_threshold,
+  });
 
   state.renderer.setViewport(path, preset.goal);
   redrawAll();
@@ -838,19 +909,38 @@ function applyGains() {
   if (state.sim && state.sim.controller) {
     state.sim.controller.setParams(state.params);
   }
+  if (state.ghostSim && state.ghostSim.controller) {
+    // ゴーストは k_β だけゼロ固定、他は追従
+    state.ghostSim.controller.setParams({ ...state.params, k_beta: 0 });
+  }
 }
 
 function redrawAll() {
   const sim = state.sim;
   if (!sim) return;
 
-  // 軌跡
-  // sim.path は持っていないので、view 用のパスを借りて描く
   const path = sim.path_for_view || currentPathObj();
   state.renderer.clear();
   state.renderer.drawGrid();
   state.renderer.drawPath(path);
-  state.renderer.drawHistory(sim.history);
+  state.renderer.drawGoalHeadingLine(sim.goal);
+
+  // ゴースト軌跡 (k_β=0, 比較用)
+  if (state.showGhost && state.ghostSim) {
+    state.renderer.drawHistory(state.ghostSim.history, {
+      color: 'rgba(120,120,120,0.55)', width: 1.5, dash: [4, 3],
+    });
+    state.renderer.drawHistoryHeadingArrows(state.ghostSim.history, {
+      color: 'rgba(120,120,120,0.8)', stepEvery: 8, armLen: 0.06,
+    });
+  }
+
+  // 本命軌跡
+  state.renderer.drawHistory(sim.history, { color: 'rgba(224,64,48,0.55)', width: 2 });
+  state.renderer.drawHistoryHeadingArrows(sim.history, {
+    color: 'rgba(224,64,48,0.85)', stepEvery: 8, armLen: 0.07,
+  });
+
   state.renderer.drawGoal(sim.goal);
   state.renderer.drawOverlays(sim.pose, sim.goal);
   state.renderer.drawRobot(sim.pose);
@@ -901,8 +991,11 @@ function animate(now) {
   while (remaining > 0) {
     const dt = Math.min(state.dt, remaining);
     state.sim.step(dt);
+    if (state.ghostSim) state.ghostSim.step(dt);
     remaining -= dt;
-    if (state.sim.finished) { state.playing = false; break; }
+    if (state.sim.finished && (!state.ghostSim || state.ghostSim.finished)) {
+      state.playing = false; break;
+    }
   }
   redrawAll();
   if (state.playing) requestAnimationFrame(animate);
@@ -967,6 +1060,7 @@ function init() {
   document.getElementById('btn-step').addEventListener('click', () => {
     state.playing = false; lastFrameTime = null;
     state.sim.step(state.dt);
+    if (state.ghostSim) state.ghostSim.step(state.dt);
     redrawAll();
   });
   document.getElementById('btn-reset').addEventListener('click', () => {
@@ -994,7 +1088,13 @@ function init() {
   bindSlider('rho-th',  'rho-th-val',  v => {
     state.rho_threshold = v / 1000;  // mm -> m
     if (state.sim) state.sim.setRhoThreshold(state.rho_threshold);
+    if (state.ghostSim) state.ghostSim.setRhoThreshold(state.rho_threshold);
   }, (v) => v.toFixed(1));
+
+  document.getElementById('show-ghost').addEventListener('change', (e) => {
+    state.showGhost = e.target.checked;
+    redrawAll();
+  });
 
   rebuildSim();
 }
