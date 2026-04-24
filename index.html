@@ -461,8 +461,9 @@ class TrajectoryRenderer {
     this.ctx = canvas.getContext('2d');
     this.ox = 0; this.oy = 0; this.scale = 100;
   }
-  setViewport(path, goal, margin = 0.3) {
-    const pts = path.sample().concat([{ x: goal.x, y: goal.y }]);
+  // extras: 追加で含めたい座標の配列 (初期位置など)
+  setViewport(path, goal, extras = [], margin = 0.3) {
+    const pts = path.sample().concat([{ x: goal.x, y: goal.y }], extras);
     let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
     for (const p of pts) {
       xmin = Math.min(xmin, p.x); xmax = Math.max(xmax, p.x);
@@ -840,6 +841,27 @@ const PRESETS = [
     initialPose: { x: 0.0, y: 0.0, theta: deg(-15) },
     goal:        { x: 1.5, y: 0.0, theta: deg(0) },
   },
+  {
+    id: 'extreme_below',
+    name: '★ 極端: ゴール真下から進入 (大弧を描いて姿勢整列)',
+    pathId: 'line_1.5m',
+    initialPose: { x: 1.2, y: -0.9, theta: deg(90) },
+    goal:        { x: 1.5, y: 0.0, theta: deg(0) },
+  },
+  {
+    id: 'extreme_below_far',
+    name: '極端: ゴールの斜め下手前から進入',
+    pathId: 'line_1.5m',
+    initialPose: { x: 0.3, y: -0.7, theta: deg(45) },
+    goal:        { x: 1.5, y: 0.0, theta: deg(0) },
+  },
+  {
+    id: 'extreme_perpendicular',
+    name: '極端: パスに対して直交方向からスタート',
+    pathId: 'line_1.5m',
+    initialPose: { x: 1.5, y: -1.0, theta: deg(90) },
+    goal:        { x: 1.5, y: 0.0, theta: deg(0) },
+  },
 ];
 
 /* =========================================================
@@ -901,7 +923,8 @@ function rebuildSim() {
     rho_threshold: state.rho_threshold,
   });
 
-  state.renderer.setViewport(path, preset.goal);
+  // 初期位置が遠くても視界に収まるようにする
+  state.renderer.setViewport(path, preset.goal, [preset.initialPose]);
   redrawAll();
 }
 
